@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Dashboard de Plagas</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+  <!-- Choices.js: Selects con buscador -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/choices.js/public/assets/styles/choices.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/choices.js/public/assets/scripts/choices.min.js"></script>
+
+  <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #F8F9FF;
+      margin: 0;
+      padding: 0;
+    }
+
+    .header {
+      background-color: #969DB9;
+      color: white;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.5rem 2rem;
+    }
+
+    .header-title {
+      font-size: 2rem;
+      font-weight: bold;
+    }
+
+    .header-logo img {
+      height: 100px;
+    }
+
+    .bar-red {
+      background-color: #971C14;
+      height: 40px;
+    }
+
+    .bar-cream {
+      background-color: #F5EFD5;
+      height: 20px;
+    }
+
+    .controls {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+      padding: 0.8rem 2rem;
+      background-color: #F5EFD5;
+    }
+
+    .filters {
+      display: flex;
+      gap: 1rem;
+    }
+
+    .filter-item {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .filter-item label {
+      /*font-weight: bold;
+      margin-bottom: 0.3rem;*/
+      font-weight: bold;
+      margin-bottom: 0.3rem;
+      background-color: #961D14;
+      color: white;
+      padding: 4px 8px;
+      border-radius: 5px;
+    }
+
+    .counters {
+      display: flex;
+      gap: 1rem;
+    }
+
+    .counter-box {
+      background-color: white;
+      padding: 0.5rem;
+      border-radius: 10px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+      text-align: center;
+      min-width: 200px;
+    }
+
+    .counter-title {
+      font-size: 1rem;
+      font-weight: bold;
+      margin-bottom: 0.3rem;
+    }
+
+    .counter-value {
+      font-size: 2rem;
+      color: #333;
+    }
+    
+    .choices {
+      width: 350px !important; /* Ajusta según necesites */
+    }
+
+    .dashboard {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto auto;
+      gap: 1rem;
+      padding: 1rem;
+    }
+
+    .card {
+      background-color: #ffffff;
+      border-radius: 10px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+      overflow: hidden;
+    }
+
+    .chart-title {
+      background-color: #B28E6E;
+      color: white;
+      text-align: center;
+      padding: 0.6rem;
+      font-weight: bold;
+      font-size: 1.5rem;
+    }
+
+    .card-content {
+      padding: 1rem;
+      font-size: 1.3rem;
+    }
+    
+    .treemap-rect {
+      transition: opacity 0.3s ease;
+    }
+
+    .leaflet-tooltip {
+      font-size: 16px !important;
+      font-weight: bold;  /* Opcional */
+      color: #222;        /* Cambia el color si deseas */
+    }
+
+    #map {
+      height: 400px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Cabecera principal -->
+  <div class="header">
+    <div class="header-title">| Variables fitosanitarias</div>
+    <div class="header-logo">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo">
+    </div>
+  </div>
+
+  <!-- Franja roja -->
+  <div class="bar-red"></div>
+
+  <!-- Controles: filtros + contadores -->
+  <div class="controls">
+    <div class="counters">
+      <div class="counter-box">
+        <div class="counter-title">Número total de reportes</div>
+        <div class="counter-value" id="total-reportes">1.000</div>
+      </div>
+      <div class="counter-box">
+        <div class="counter-title">Número total de plagas</div>
+        <div class="counter-value" id="total-plagas">1.000</div>
+      </div>
+    </div>
+    <div class="filters">
+      <div class="filter-item">
+        <label for="filtro-plaga">Plaga</label>
+        <select id="filtro-plaga">
+          <option value="todas">Todas</option>
+        </select>
+      </div>
+      <div class="filter-item">
+        <label for="filtro-hospedante">Hospedante</label>
+        <select id="filtro-hospedante">
+          <option value="todos">Todos</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sección de dashboard -->
+  <div class="dashboard">
+    <div class="card">
+      <div class="chart-title">Evolución de reportes de plagas</div>
+      <div class="card-content">
+        <svg id="trend" width="100%" height="300"></svg>
+      </div>
+    </div>
+    <div class="card">
+      <div class="chart-title">Top 10 plagas</div>
+      <div class="card-content">
+        <svg id="treemap" width="100%" height="300"></svg>
+      </div>
+    </div>
+    <div class="card">
+      <div class="chart-title">Top 10 hospedantes</div>
+      <div class="card-content">
+        <div id="hosts"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="chart-title">Distribución geográfica</div>
+      <div class="card-content">
+        <div id="map"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cargar el script externo desde la carpeta static -->
+  <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
