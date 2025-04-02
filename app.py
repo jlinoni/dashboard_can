@@ -1,15 +1,24 @@
 from flask import Flask, jsonify, render_template, request
 import psycopg2
+import os
 import json
 from collections import Counter
 
 app = Flask(__name__)
+
+# Usa la IP v4 en lugar del hostname con IPv6
+DB_HOST = os.getenv("DB_HOST", "54.204.115.48")  # <- REEMPLAZA por la IP v4 de tu Supabase
+DB_NAME = os.getenv("DB_NAME", "postgres")
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASS = os.getenv("DB_PASSWORD", "U55tm698$$")
+DB_PORT = os.getenv("DB_PORT", "5432")
+
 conn = psycopg2.connect(
-    dbname="postgres",
-    user="postgres",
-    password="U55tm698$$",
-    host="2600:1f1e:75b:4b0b:f03:c0ae:70b4:52ce",
-    port="5432"
+    dbname=DB_NAME,
+    user=DB_USER,
+    password=DB_PASS,
+    host=DB_HOST,
+    port=DB_PORT
 )
 
 @app.route("/")
