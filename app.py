@@ -1,25 +1,9 @@
 from flask import Flask, jsonify, render_template, request
-import psycopg2
-import os
+import pandas as pd
 import json
 from collections import Counter
 
 app = Flask(__name__)
-
-# Usa la IP v4 en lugar del hostname con IPv6
-DB_HOST = os.getenv("DB_HOST", "54.204.115.48")  # <- REEMPLAZA por la IP v4 de tu Supabase
-DB_NAME = os.getenv("DB_NAME", "postgres")
-DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASS = os.getenv("DB_PASSWORD", "U55tm698$$")
-DB_PORT = os.getenv("DB_PORT", "5432")
-
-conn = psycopg2.connect(
-    dbname=DB_NAME,
-    user=DB_USER,
-    password=DB_PASS,
-    host=DB_HOST,
-    port=DB_PORT
-)
 
 @app.route("/")
 def index():
@@ -30,60 +14,40 @@ def tendencias_nivel(nivel):
     plaga = request.args.get("plaga")
     hospedante = request.args.get("hospedante")
 
-    if nivel == "anio":
-        date_format = 'YYYY'
-    elif nivel == "mes":
-        date_format = 'YYYY-MM'
-    elif nivel == "dia":
-        date_format = 'YYYY-MM-DD'
-    else:
+    niveles_archivo = {
+        "anio": "static/data/tendencias_anio.csv",
+        "mes": "static/data/tendencias_mes.csv",
+        "dia": "static/data/tendencias_dia.csv"
+    }
+
+    if nivel not in niveles_archivo:
         return jsonify([])
 
-    cur = conn.cursor()
-    query = f"""
-        SELECT TO_CHAR(created_at, '{date_format}') AS periodo, COUNT(*)
-        FROM cabi_species
-    """
-    condiciones = []
-    params = []
+    df = pd.read_csv(niveles_archivo[nivel])
 
     if plaga:
-        condiciones.append("scientific_name = %s")
-        params.append(plaga)
+        df = df[df["plaga"] == plaga]
     if hospedante:
-        condiciones.append("hosts ILIKE %s")
-        params.append(f"%{hospedante}%")
+        df = df[df["hospedante"].str.contains(hospedante, case=False, na=False)]
 
-    if condiciones:
-        query += " WHERE " + " AND ".join(condiciones)
-
-    query += " GROUP BY periodo ORDER BY periodo"
-
-    cur.execute(query, tuple(params))
-    data = [{"periodo": row[0], "total": row[1]} for row in cur.fetchall()]
+    data = df.to_dict(orient="records")
     return jsonify(data)
 
 @app.route("/api/top-plagas")
 def top_plagas():
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT scientific_name, COUNT(*) AS total
-        FROM cabi_species
-        GROUP BY scientific_name
-        ORDER BY total DESC
-        LIMIT 10
-    """)
-    data = [{"nombre": row[0], "total": row[1]} for row in cur.fetchall()]
-    return jsonify(data)
+    df = pd.read_csv("static/data/top_plagas.csv")
+    return jsonify(df.to_dict(orient="records"))
 
 @app.route("/api/hosts/<scientific_name>")
 def hosts_por_plaga(scientific_name):
-    cur = conn.cursor()
-    cur.execute("SELECT hosts FROM cabi_species WHERE scientific_name = %s", (scientific_name,))
+    df = pd.read_csv("static/data/hosts_por_plaga.csv")
+    df = df[df["scientific_name"] == scientific_name]
+
     all_hosts = []
-    for row in cur.fetchall():
-        if row[0] and row[0] != "No encontrado":
-            all_hosts.extend([h.strip() for h in row[0].split(",")])
+    for hosts in df["hosts"]:
+        if pd.notna(hosts) and hosts != "No encontrado":
+            all_hosts.extend([h.strip() for h in hosts.split(",")])
+
     contados = Counter(all_hosts).most_common(15)
     data = [{"nombre": h, "total": c} for h, c in contados]
     return jsonify(data)
@@ -93,30 +57,20 @@ def paises():
     plaga = request.args.get("plaga")
     hospedante = request.args.get("hospedante")
 
+    df = pd.read_csv("static/data/distribucion.csv")
+
+    if plaga:
+        df = df[df["scientific_name"] == plaga]
+    if hospedante:
+        df = df[df["hosts"].str.contains(hospedante, case=False, na=False)]
+
     with open("static/data/geo.json") as f:
         geo = json.load(f)
 
-    cur = conn.cursor()
-    query = "SELECT distribution FROM cabi_species"
-    condiciones = []
-    params = []
-
-    if plaga:
-        condiciones.append("scientific_name = %s")
-        params.append(plaga)
-    if hospedante:
-        condiciones.append("hosts ILIKE %s")
-        params.append(f"%{hospedante}%")
-
-    if condiciones:
-        query += " WHERE " + " AND ".join(condiciones)
-
-    cur.execute(query, tuple(params))
-
     country_count = Counter()
-    for row in cur.fetchall():
-        if row[0] and row[0] != "No encontrado":
-            for country in row[0].split(","):
+    for dist in df["distribution"]:
+        if pd.notna(dist) and dist != "No encontrado":
+            for country in dist.split(","):
                 country_count[country.strip()] += 1
 
     data = []
@@ -133,57 +87,19 @@ def paises():
 
 @app.route("/api/plagas")
 def obtener_plagas():
-    cur = conn.cursor()
-    cur.execute("SELECT DISTINCT scientific_name FROM cabi_species ORDER BY scientific_name")
-    data = [row[0] for row in cur.fetchall()]
-    return jsonify(data)
+    df = pd.read_csv("static/data/plagas.csv")
+    return jsonify(df["scientific_name"].dropna().unique().tolist())
 
 @app.route("/api/hospedantes")
 def obtener_hospedantes():
-    cur = conn.cursor()
-    cur.execute("SELECT DISTINCT unnest(string_to_array(hosts, ',')) AS hospedante FROM cabi_species WHERE hosts IS NOT NULL AND hosts != 'No encontrado'")
-    data = [row[0].strip() for row in cur.fetchall()]
-    return jsonify(sorted(set(data)))
+    df = pd.read_csv("static/data/hospedantes.csv")
+    return jsonify(df["hospedante"].dropna().unique().tolist())
 
 @app.route("/api/contadores")
 def obtener_contadores():
-    plaga = request.args.get("plaga")
-    hospedante = request.args.get("hospedante")
-    cur = conn.cursor()
-
-    condiciones = []
-    params = []
-
-    if plaga:
-        condiciones.append("scientific_name = %s")
-        params.append(plaga)
-    if hospedante:
-        condiciones.append("hosts ILIKE %s")
-        params.append(f"%{hospedante}%")
-
-    base_query = "SELECT COUNT(*) FROM cabi_species"
-    if condiciones:
-        base_query += " WHERE " + " AND ".join(condiciones)
-
-    cur.execute(base_query, tuple(params))
-    total_reportes = cur.fetchone()[0]
-
-    if plaga and not hospedante:
-        total_plagas = 1
-    else:
-        query = "SELECT COUNT(DISTINCT scientific_name) FROM cabi_species"
-        if hospedante:
-            query += " WHERE hosts ILIKE %s"
-            cur.execute(query, (f"%{hospedante}%",))
-        else:
-            cur.execute(query)
-        total_plagas = cur.fetchone()[0]
-
-    return jsonify({
-        "reportes": total_reportes,
-        "plagas": total_plagas
-    })
+    df = pd.read_csv("static/data/contadores.csv")
+    result = df.iloc[0].to_dict()
+    return jsonify({"reportes": result["total_reportes"], "plagas": result["total_plagas"]})
 
 if __name__ == "__main__":
-    from waitress import serve
-    serve(app, host="0.0.0.0", port=8080)
+    app.run(debug=True)
